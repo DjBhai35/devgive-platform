@@ -81,6 +81,15 @@ export default function ProjectDetailPage() {
   const [paymentError, setPaymentError] = useState<string | null>(null);
 
   const watchTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const playerRef = useRef<any>(null);
+  const [playerReady, setPlayerReady] = useState(false);
+
+  // Helper to extract 11-char YouTube ID
+  const getYouTubeId = (url: string | null) => {
+    if (!url) return '';
+    const match = url.match(/(?:youtu\.be\/|youtube\.com\/(?:embed\/|v\/|watch\?v=|watch\?.+&v=))([\w-]{11})/);
+    return match ? match[1] : url;
+  };
 
   useEffect(() => {
     if (!params.id) return;
@@ -101,11 +110,81 @@ export default function ProjectDetailPage() {
       .finally(() => setLoading(false));
   }, [params.id]);
 
-  // YouTube watch simulation / tracker
+  // Load YouTube IFrame API script
+  useEffect(() => {
+    if (!project || project.isPremium || claimSuccess) return;
+
+    const tagId = 'youtube-iframe-api-script';
+    if (!document.getElementById(tagId)) {
+      const tag = document.createElement('script');
+      tag.id = tagId;
+      tag.src = 'https://www.youtube.com/iframe_api';
+      const firstScriptTag = document.getElementsByTagName('script')[0];
+      firstScriptTag?.parentNode?.insertBefore(tag, firstScriptTag);
+    }
+
+    const initPlayer = () => {
+      const videoId = getYouTubeId(project.youtubeUrl);
+      if (!videoId || !(window as any).YT || !(window as any).YT.Player) return;
+
+      const playerElement = document.getElementById('youtube-player-frame');
+      if (!playerElement) return;
+
+      if (playerRef.current) {
+        try {
+          playerRef.current.destroy();
+        } catch {}
+      }
+
+      playerRef.current = new (window as any).YT.Player('youtube-player-frame', {
+        height: '340',
+        width: '100%',
+        videoId: videoId,
+        playerVars: {
+          autoplay: 0,
+          controls: 1,
+          rel: 0,
+          modestbranding: 1,
+        },
+        events: {
+          onReady: () => setPlayerReady(true),
+          onStateChange: (event: any) => {
+            // YT.PlayerState.PLAYING is 1
+            if (event.data === 1) {
+              setIsWatching(true);
+            } else {
+              setIsWatching(false);
+            }
+          },
+        },
+      });
+    };
+
+    if ((window as any).YT && (window as any).YT.Player) {
+      initPlayer();
+    } else {
+      (window as any).onYouTubeIframeAPIReady = initPlayer;
+    }
+
+    return () => {
+      if (playerRef.current) {
+        try {
+          playerRef.current.destroy();
+        } catch {}
+      }
+    };
+  }, [project?.id, project?.youtubeUrl, claimSuccess]);
+
+  // Timer accumulates seconds ONLY when YouTube video is actually playing
   useEffect(() => {
     if (isWatching) {
       watchTimerRef.current = setInterval(() => {
-        setWatchedSeconds((prev) => prev + 1);
+        setWatchedSeconds((prev) => {
+          if (project && prev + 1 >= (project.youtubeRequiredDuration || 60)) {
+            // Reached required duration
+          }
+          return prev + 1;
+        });
       }, 1000);
     } else {
       if (watchTimerRef.current) clearInterval(watchTimerRef.current);
@@ -113,7 +192,7 @@ export default function ProjectDetailPage() {
     return () => {
       if (watchTimerRef.current) clearInterval(watchTimerRef.current);
     };
-  }, [isWatching]);
+  }, [isWatching, project]);
 
   const toggleWishlist = async () => {
     if (!user) {
@@ -424,12 +503,24 @@ export default function ProjectDetailPage() {
                       </div>
                     )}
 
+                    {/* Real Embedded YouTube Video Player Container */}
+                    <div
+                      className="mb-3 rounded-4 overflow-hidden border shadow-sm bg-dark position-relative"
+                      style={{ minHeight: '340px' }}
+                    >
+                      <div id="youtube-player-frame" className="w-100" style={{ height: '340px' }}></div>
+                    </div>
+
                     {/* YouTube Watch Tracker UI */}
                     <div className="p-3 bg-white rounded-3 border mb-3">
                       <div className="d-flex align-items-center justify-content-between mb-2">
                         <div className="d-flex align-items-center gap-2 small fw-semibold text-dark">
                           <Youtube size={18} className="text-danger" />
-                          <span>Watch Progress</span>
+                          <span>
+                            {isWatching
+                              ? '▶ Video Playing (Tracking watch time...)'
+                              : '⏸ Play the video above to advance the unlock timer'}
+                          </span>
                         </div>
                         <span className="badge bg-secondary-subtle text-secondary rounded-pill small">
                           {watchedSeconds}s / {project.youtubeRequiredDuration}s
@@ -439,7 +530,9 @@ export default function ProjectDetailPage() {
                       {/* Progress Bar */}
                       <div className="progress mb-3" style={{ height: '8px' }}>
                         <div
-                          className="progress-bar bg-primary progress-bar-striped progress-bar-animated"
+                          className={`progress-bar progress-bar-striped progress-bar-animated ${
+                            watchedSeconds >= project.youtubeRequiredDuration ? 'bg-success' : 'bg-primary'
+                          }`}
                           style={{
                             width: `${Math.min(
                               100,
@@ -449,38 +542,32 @@ export default function ProjectDetailPage() {
                         ></div>
                       </div>
 
-                      <div className="d-flex flex-wrap gap-2">
-                        <button
-                          type="button"
-                          onClick={() => setIsWatching(!isWatching)}
-                          className={`btn btn-sm ${
-                            isWatching ? 'btn-outline-danger' : 'btn-outline-primary'
-                          } rounded-pill px-3 py-1.5 fw-semibold small`}
-                        >
-                          {isWatching ? 'Pause Watching' : '▶ Start Watching Video'}
-                        </button>
+                      {watchedSeconds >= project.youtubeRequiredDuration && (
+                        <div className="alert alert-success py-2 small d-flex align-items-center gap-2 mb-3">
+                          <CheckCircle2 size={16} /> Required watch duration completed! Click verify to unlock download.
+                        </div>
+                      )}
 
+                      <div className="d-flex flex-wrap align-items-center gap-2">
                         <button
                           type="button"
                           disabled={watchedSeconds < project.youtubeRequiredDuration || verifyingClaim}
                           onClick={handleVerifyFreeClaim}
-                          className="btn-pill btn-pill-primary small py-1.5 px-3"
+                          className="btn-pill btn-pill-primary small py-2 px-4 shadow-sm"
                         >
                           <ShieldCheck size={16} />
-                          {verifyingClaim ? 'Verifying with Server...' : 'Verify & Unlock Download'}
+                          {verifyingClaim ? 'Verifying with Server...' : 'Verify Claim & Unlock Download'}
+                        </button>
+
+                        <button
+                          onClick={toggleWishlist}
+                          disabled={wishlistLoading}
+                          className={`btn-pill btn-pill-outline small py-2 px-3.5 ${isWishlisted ? 'text-danger' : ''}`}
+                        >
+                          <Heart size={15} fill={isWishlisted ? 'currentColor' : 'none'} />
+                          {isWishlisted ? 'Saved' : 'Save to Wishlist'}
                         </button>
                       </div>
-                    </div>
-
-                    <div className="d-flex align-items-center gap-2">
-                      <button
-                        onClick={toggleWishlist}
-                        disabled={wishlistLoading}
-                        className={`btn-pill btn-pill-outline small py-2 px-3.5 ${isWishlisted ? 'text-danger' : ''}`}
-                      >
-                        <Heart size={15} fill={isWishlisted ? 'currentColor' : 'none'} />
-                        {isWishlisted ? 'Saved' : 'Save to Wishlist'}
-                      </button>
                     </div>
                   </div>
                 )}

@@ -69,6 +69,8 @@ export default function AdminProjectsPage() {
   const [thumbnail, setThumbnail] = useState('');
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [youtubeRequiredDuration, setYoutubeRequiredDuration] = useState('60');
+  const [sourcePackagePath, setSourcePackagePath] = useState('storage/packages/ecommerce-saas.zip');
+  const [uploadingZip, setUploadingZip] = useState(false);
   const [published, setPublished] = useState(true);
 
   const fetchProjects = async () => {
@@ -108,6 +110,7 @@ export default function AdminProjectsPage() {
     setThumbnail('https://images.unsplash.com/photo-1556742049-0a67e5572263?auto=format&fit=crop&w=800&q=80');
     setYoutubeUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
     setYoutubeRequiredDuration('60');
+    setSourcePackagePath('storage/packages/ecommerce-saas.zip');
     setPublished(true);
     setErrorMessage(null);
     setModalOpen(true);
@@ -128,6 +131,7 @@ export default function AdminProjectsPage() {
     setThumbnail(p.thumbnail || '');
     setYoutubeUrl(p.youtubeUrl || '');
     setYoutubeRequiredDuration(String(p.youtubeRequiredDuration));
+    setSourcePackagePath(p.sourcePackagePath || 'storage/packages/ecommerce-saas.zip');
     setPublished(p.published);
     setErrorMessage(null);
     setModalOpen(true);
@@ -154,6 +158,7 @@ export default function AdminProjectsPage() {
       liveDemoUrl: liveDemoUrl || null,
       isPremium,
       price: isPremium ? parseFloat(price) || 0 : 0,
+      sourcePackagePath,
       thumbnail: thumbnail || null,
       youtubeUrl: youtubeUrl || null,
       youtubeRequiredDuration: parseInt(youtubeRequiredDuration, 10) || 60,
@@ -471,6 +476,47 @@ export default function AdminProjectsPage() {
                         onChange={(e) => setYoutubeUrl(e.target.value)}
                         className="form-control form-control-saas"
                       />
+                    </div>
+
+                    <div className="col-12 col-md-6">
+                      <label className="form-label small fw-semibold text-secondary">
+                        Upload Actual Source Code ZIP {uploadingZip && '(Uploading...)'}
+                      </label>
+                      <input
+                        type="file"
+                        accept=".zip"
+                        disabled={uploadingZip}
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (!file) return;
+                          setUploadingZip(true);
+                          const fd = new FormData();
+                          fd.append('file', file);
+                          try {
+                            const res = await fetch('/api/admin/upload-package', {
+                              method: 'POST',
+                              body: fd,
+                            });
+                            const data = await res.json();
+                            if (res.ok && data.packagePath) {
+                              setSourcePackagePath(data.packagePath);
+                              alert('ZIP uploaded successfully: ' + data.filename);
+                            } else {
+                              alert(data.error || 'Failed to upload ZIP package');
+                            }
+                          } catch (err: any) {
+                            alert('Upload failed: ' + err.message);
+                          } finally {
+                            setUploadingZip(false);
+                          }
+                        }}
+                        className="form-control form-control-saas"
+                      />
+                      {sourcePackagePath && (
+                        <div className="text-muted small mt-1 font-monospace" style={{ fontSize: '0.75rem' }}>
+                          Current file: {sourcePackagePath}
+                        </div>
+                      )}
                     </div>
 
                     <div className="col-12 col-md-4">
